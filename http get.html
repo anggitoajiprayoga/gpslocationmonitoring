@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Monitoring</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+        }
+        header {
+            background-color: #2196F3;
+            color: white;
+            text-align: left;
+            padding: 1px 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        #map {
+            height: calc(100% - 140px);
+            width: 100%;
+        }
+        .info-box {
+            position: absolute;
+            top: 19px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            font-size: 1em;
+            color: #333;
+        }
+        .buttons {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        .button {
+            background-color: #5c666e;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s, transform 0.3s;
+        }
+        .button:hover {
+            background-color: #1976D2;
+            color: #fff;
+            transform: translateY(-2px);
+        }
+        .refresh-button {
+            background-color: #4CAF50;
+        }
+        .center-button {
+            background-color: #FFC107;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            font-size: 1.2em;
+            color: #333;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 style="display: inline-block; vertical-align: middle; margin-left: 10px;">Location Monitoring</h1>
+    </header>
+    
+    <div id="map"></div>
+    <div class="info-box">
+        <div>
+            <strong>Longitude:</strong> <span id="longitude-container">Loading...</span>
+        </div>
+        <div>
+            <strong>Latitude:</strong> <span id="latitude-container">Loading...</span>
+        </div>
+    </div>
+    <div class="buttons">
+        <button class="button refresh-button" id="refreshButton">Refresh</button>
+        <button class="button center-button" id="autoCenterButton">Auto Center</button>
+    </div>
+    <div class="loading" id="loading">Loading...</div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const token = 'BBUS-xS5WW2jJ6cvtucTSTmf3ttsj4YnAbm';
+            let map, marker;
+            let isFirstLoad = true; // Flag to check if it's the initial load
+    
+            const fetchData = (url) => {
+                return fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'X-Auth-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    throw error;
+                });
+            };
+    
+            const refreshData = () => {
+                document.getElementById('loading').style.display = 'block';
+                const longitudeUrl = 'https://industrial.api.ubidots.com/api/v1.6/devices/esp32/longitude/lv';
+                const latitudeUrl = 'https://industrial.api.ubidots.com/api/v1.6/devices/esp32/latitude/lv';
+    
+                Promise.all([fetchData(longitudeUrl), fetchData(latitudeUrl)])
+                    .then(([longitudeData, latitudeData]) => {
+                        console.log('Longitude Data:', longitudeData);
+                        console.log('Latitude Data:', latitudeData);
+    
+                        const longitude = parseFloat(longitudeData);
+                        const latitude = parseFloat(latitudeData);
+    
+                        if (!isNaN(longitude) && !isNaN(latitude)) {
+                            document.getElementById('longitude-container').textContent = longitude;
+                            document.getElementById('latitude-container').textContent = latitude;
+                            if (!marker) {
+                                marker = L.marker([latitude, longitude]).addTo(map);
+                                marker.bindPopup("<b>Device Location</b><br>This is the location.").openPopup();
+                                map.setView([latitude, longitude], 15); // Center map on initial load
+                            } else {
+                                marker.setLatLng([latitude, longitude]); // Update marker position
+                            }
+                            if (isFirstLoad) {
+                                isFirstLoad = false; // Set flag to false after initial load
+                            }
+                        } else {
+                            throw new Error('Invalid latitude or longitude received from API.');
+                        }
+                    })
+                    .catch(error => {
+                        document.getElementById('longitude-container').textContent = 'Error';
+                        document.getElementById('latitude-container').textContent = 'Error';
+                        console.error('Error updating marker:', error);
+                    })
+                    .finally(() => {
+                        document.getElementById('loading').style.display = 'none';
+                    });
+            };
+
+            const autoCenter = () => {
+                if (marker) {
+                    map.setView(marker.getLatLng(), 15); // Center map on marker
+                }
+            };
+    
+            // Initialize map
+            map = L.map('map'); // Initialize map without setting view
+    
+            // Add OpenStreetMap Layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+    
+            // Add event listeners to buttons
+            document.getElementById('refreshButton').addEventListener('click', refreshData);
+            document.getElementById('autoCenterButton').addEventListener('click', autoCenter);
+    
+            // Auto refresh data every 5 seconds
+            setInterval(refreshData, 5000);
+
+            // Initial load
+            refreshData();
+        });
+    </script>
+</body>
+</html>
