@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Monitoring</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            min-height: 100vh;
+        }
+        header {
+            background-color: #2196F3;
+            color: white;
+            text-align: left;
+            padding: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        main {
+            display: grid;
+            grid-template-rows: 1fr auto;
+            gap: 10px;
+            padding: 10px;
+            position: relative;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        .info-box {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            font-size: 1em;
+            color: #333;
+        }
+        .buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .button {
+            background-color: #5c666e;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s, transform 0.3s;
+        }
+        .button:hover {
+            background-color: #1976D2;
+            color: #fff;
+            transform: translateY(-2px);
+        }
+        .refresh-button {
+            background-color: #4CAF50;
+        }
+        .center-button {
+            background-color: #FFC107;
+        }
+        .loading {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            font-size: 1.2em;
+            color: #333;
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 999;
+            opacity: 0.9;
+            animation: fadeInOut 1s ease-in-out infinite;
+        }
+        .loading-text {
+            margin-bottom: 15px;
+        }
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0.9; }
+            50% { opacity: 0.5; }
+        }
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 120px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 style="margin: 0;">Location Monitoring</h1>
+        <p>Note: Jika menggunakan ponsel, gunakan mode desktop untuk tampilan maksimal</p>
+    </header>
+
+    <main>
+        <div id="map" class="tooltip" title="Klik untuk memperbesar peta"></div>
+        <div class="info-box">
+            <div>
+                <strong>Longitude:</strong> <span id="longitude-container">Loading...</span>
+            </div>
+            <div>
+                <strong>Latitude:</strong> <span id="latitude-container">Loading...</span>
+            </div>
+        </div>
+        <div class="buttons">
+            <button class="button refresh-button tooltip" id="refreshButton" title="Klik untuk memperbarui data">Refresh</button>
+            <button class="button center-button tooltip" id="autoCenterButton" title="Klik untuk pusatkan peta pada lokasi">Auto Center</button>
+        </div>
+        <div class="loading" id="loading">
+            <div class="loading-text">Loading...</div>
+            <div class="loading-spinner"></div>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const token = 'BBUS-xS5WW2jJ6cvtucTSTmf3ttsj4YnAbm';
+            let map, marker;
+            let isFirstLoad = true; // Flag to check if it's the initial load
+    
+            const fetchData = (url) => {
+                return fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'X-Auth-Token': token,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    throw error;
+                });
+            };
+    
+            const refreshData = () => {
+                document.getElementById('loading').style.display = 'block';
+                const longitudeUrl = 'https://industrial.api.ubidots.com/api/v1.6/devices/esp32/longitude/lv';
+                const latitudeUrl = 'https://industrial.api.ubidots.com/api/v1.6/devices/esp32/latitude/lv';
+    
+                Promise.all([fetchData(longitudeUrl), fetchData(latitudeUrl)])
+                    .then(([longitudeData, latitudeData]) => {
+                        console.log('Longitude Data:', longitudeData);
+                        console.log('Latitude Data:', latitudeData);
+    
+                        const longitude = parseFloat(longitudeData);
+                        const latitude = parseFloat(latitudeData);
+    
+                        if (!isNaN(longitude) && !isNaN(latitude)) {
+                            document.getElementById('longitude-container').textContent = longitude;
+                            document.getElementById('latitude-container').textContent = latitude;
+                            if (!marker) {
+                                marker = L.marker([latitude, longitude]).addTo(map);
+                                marker.bindPopup("<b>Device Location</b><br>This is the location.").openPopup();
+                                map.setView([latitude, longitude], 15); // Center map on initial load
+                            } else {
+                                marker.setLatLng([latitude, longitude]); // Update marker position
+                            }
+                            if (isFirstLoad) {
+                                isFirstLoad = false; // Set flag to false after initial load
+                            }
+                        } else {
+                            throw new Error('Invalid latitude or longitude received from API.');
+                        }
+                    })
+                    .catch(error => {
+                        document.getElementById('longitude-container').textContent = 'Error';
+                        document.getElementById('latitude-container').textContent = 'Error';
+                        console.error('Error updating marker:', error);
+                    })
+                    .finally(() => {
+                        document.getElementById('loading').style.display = 'none';
+                    });
+            };
+
+            const autoCenter = () => {
+                if (marker) {
+                    map.setView(marker.getLatLng(), 15); // Center map on marker
+                }
+            };
+    
+            // Initialize map
+            map = L.map('map'); // Initialize map without setting view
+    
+            // Add OpenStreetMap Layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+    
+            // Add event listeners to buttons
+            document.getElementById('refreshButton').addEventListener('click', refreshData);
+            document.getElementById('autoCenterButton').addEventListener('click', autoCenter);
+    
+            // Auto refresh data every 5 seconds
+            setInterval(refreshData, 5000);
+
+            // Initial load
+            refreshData();
+        });
+    </script>
+</body>
+</html>
